@@ -19,22 +19,23 @@
     th,td { border:1px solid #ddd; padding:12px; text-align:center; }
     th { background:#ecf0f1; font-size:22px; }
 
-    /* الكاميرا والإطار */
-    #scanner { display:none; margin:15px auto; width:320px; height:320px; position:relative; border-radius:12px; overflow:hidden; background:#000; }
-    video { width:100%; height:100%; object-fit:cover; }
-
-    .scan-box{
-      position:absolute; width:86%; height:32%;
-      left:7%; top:34%;
-      border:3px solid #00e5ff; border-radius:10px;
-      pointer-events:none;
+    /* الكاميرا — شاشة كاملة بدون إطار */
+    #scanner {
+      display:none;
+      position:fixed;
+      inset:0;
+      background:#000;
+      z-index:9998;
     }
-    .scan-line{
-      position:absolute; left:8%; width:84%; height:2px; background:#ff3b3b;
-      box-shadow:0 0 8px #ff3b3b,0 0 16px #ff3b3b;
-      animation:sweep 1.3s linear infinite;
+    #scannerHeader{
+      position:absolute; top:10px; left:10px; right:10px;
+      display:flex; justify-content:space-between; align-items:center; z-index:9999;
+      color:#fff; font-size:18px; padding:0 8px;
     }
-    @keyframes sweep { 0%{ top:36%; } 100%{ top:64%; } }
+    #closeScan {
+      background:#e74c3c; border:none; color:#fff; padding:10px 16px; border-radius:10px; cursor:pointer; font-size:18px;
+    }
+    #video { width:100vw; height:100vh; object-fit:cover; }
 
     #lastScan { text-align:center; font-size:24px; margin-top:10px; font-weight:bold; color:#2c3e50; }
     .btn-sm { padding:10px 20px; font-size:20px; margin:5px; border-radius:8px; cursor:pointer; }
@@ -54,7 +55,7 @@
       border-radius: 12px;
       width: 90%; max-width: 400px;
       text-align: center;
-      box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+      box-shadow:0 5px 15px rgba(0,0,0,0.3);
       font-size: 20px;
       border-top: 6px solid #1abc9c;
     }
@@ -146,12 +147,13 @@
     </table>
   </section>
 
-  <!-- الكاميرا -->
+  <!-- الكاميرا (شاشة كاملة) -->
   <div id="scanner">
-    <video id="video" autoplay></video>
-    <div class="scan-box">
-      <div class="scan-line"></div>
+    <div id="scannerHeader">
+      <div>📷 الماسح يعمل — وجّه الكاميرا للباركود</div>
+      <button id="closeScan" onclick="stopScanner()">إغلاق</button>
     </div>
+    <video id="video" autoplay playsinline></video>
   </div>
   <div id="lastScan"></div>
 
@@ -173,17 +175,131 @@
     let transactions = JSON.parse(localStorage.getItem("transactions") || "[]");
     let scannerMode = null;
     let codeReader = null;
+    let stopAfterFirst = false;
 
-    function saveData(){ localStorage.setItem("products", JSON.stringify(products)); localStorage.setItem("transactions", JSON.stringify(transactions)); }
-    function loadProducts(){ const tbody=document.querySelector("#productsTable tbody"); tbody.innerHTML=""; let total=0; products.forEach(p=>{tbody.innerHTML+=`<tr><td>${p.barcode}</td><td>${p.price}</td><td>${p.stock}</td><td><button class="btn-sm edit" onclick="editProduct('${p.barcode}')">✏️ تعديل</button><button class="btn-sm delete" onclick="deleteProduct('${p.barcode}')">🗑️ حذف</button></td></tr>`; total+=p.price*p.stock;}); document.getElementById("inventoryValue").textContent=total.toFixed(2);}
-    function addOrUpdateProduct(){ const price=parseFloat(document.getElementById("pprice").value)||0; const barcode=document.getElementById("pbarcode").value.trim(); const stock=parseInt(document.getElementById("pstock").value)||0; if(!barcode) return alert("❌ أدخل الباركود"); let p=products.find(x=>x.barcode===barcode); if(p){ p.price=price||p.price; p.stock+=stock; } else { products.push({barcode,price,stock}); } saveData(); loadProducts();}
-    function editProduct(b){ let p=products.find(x=>x.barcode===b); if(!p) return; document.getElementById("pbarcode").value=p.barcode; document.getElementById("pprice").value=p.price; document.getElementById("pstock").value=p.stock; showPage("products"); }
-    function deleteProduct(b){ products=products.filter(p=>p.barcode!==b); saveData(); loadProducts(); }
-    function recordTransaction(b,q,pr){ let p=products.find(x=>x.barcode===b)||{price:0}; transactions.push({type:"بيع",barcode:b,qty:q,price:pr,total:pr*q,cost:p.price*q,date:new Date().toLocaleString()}); saveData();}
-    function processTransaction(){ const b=document.getElementById("sellBarcode").value; const q=parseInt(document.getElementById("sellQty").value)||0; const pr=parseFloat(document.getElementById("sellPrice").value)||0; let p=products.find(x=>x.barcode===b); if(!p) return alert("❌ المنتج غير موجود"); if(p.stock<q) return alert("❌ مخزون غير كافي"); p.stock-=q; recordTransaction(b,q,pr); saveData(); loadProducts(); alert("✔ تمت عملية البيع"); }
-    function calcProfit(){ let s=0,c=0; transactions.forEach(t=>{s+=t.price*t.qty;c+=t.cost;}); document.getElementById("totalSales").textContent=s.toFixed(2); document.getElementById("totalCost").textContent=c.toFixed(2); document.getElementById("netProfit").textContent=(s-c).toFixed(2);}
-    function loadHistory(){ const tbody=document.querySelector("#historyTable tbody"); tbody.innerHTML=""; transactions.forEach(t=>{ tbody.innerHTML+=`<tr><td>${t.type}</td><td>${t.barcode}</td><td>${t.qty}</td><td>${t.price}</td><td>${t.total}</td><td>${t.date}</td></tr>`; }); }
-    function showPage(id){ document.querySelectorAll("section").forEach(s=>s.classList.remove("active")); document.getElementById(id).classList.add("active"); if(id==="products") loadProducts(); if(id==="profit") calcProfit(); if(id==="history") loadHistory(); }
+    function saveData(){
+      localStorage.setItem("products", JSON.stringify(products));
+      localStorage.setItem("transactions", JSON.stringify(transactions));
+    }
+
+    function loadProducts(){
+      const tbody=document.querySelector("#productsTable tbody");
+      tbody.innerHTML="";
+      let total=0;
+      products.forEach(p=>{
+        tbody.innerHTML+=`<tr>
+          <td>${p.barcode}</td>
+          <td>${p.price}</td>
+          <td>${p.stock}</td>
+          <td>
+            <button class="btn-sm edit" onclick="editProduct('${p.barcode}')">✏️ تعديل</button>
+            <button class="btn-sm delete" onclick="deleteProduct('${p.barcode}')">🗑️ حذف</button>
+          </td>
+        </tr>`;
+        total+= (parseFloat(p.price)||0) * (parseInt(p.stock)||0);
+      });
+      document.getElementById("inventoryValue").textContent=total.toFixed(2);
+    }
+
+    function addOrUpdateProduct(){
+      const price=parseFloat(document.getElementById("pprice").value)||0;
+      const barcode=document.getElementById("pbarcode").value.trim();
+      const stock=parseInt(document.getElementById("pstock").value)||0;
+      if(!barcode) return alert("❌ أدخل الباركود");
+      let p=products.find(x=>x.barcode===barcode);
+      if(p){
+        p.price = (price || p.price);
+        p.stock = (parseInt(p.stock)||0) + stock;
+      } else {
+        products.push({barcode,price,stock});
+      }
+      saveData(); loadProducts();
+    }
+
+    function editProduct(b){
+      let p=products.find(x=>x.barcode===b);
+      if(!p) return;
+      document.getElementById("pbarcode").value=p.barcode;
+      document.getElementById("pprice").value=p.price;
+      document.getElementById("pstock").value=p.stock;
+      showPage("products");
+    }
+
+    function deleteProduct(b){
+      products=products.filter(p=>p.barcode!==b);
+      saveData(); loadProducts();
+    }
+
+    function recordTransaction(b,q,pr){
+      const p=products.find(x=>x.barcode===b);
+      const costPerUnit = p ? (parseFloat(p.price)||0) : 0;
+      transactions.push({
+        type:"بيع",
+        barcode:b,
+        qty:q,
+        price:pr,
+        total:pr*q,
+        cost: costPerUnit*q,
+        date:new Date().toLocaleString()
+      });
+      saveData();
+    }
+
+    // ✅ البيع حصراً عند وجود المنتج
+    function processTransaction(){
+      const b=document.getElementById("sellBarcode").value.trim();
+      const q=parseInt(document.getElementById("sellQty").value)||0;
+      const pr=parseFloat(document.getElementById("sellPrice").value)||0;
+
+      if(!b) return alert("❌ أدخل الباركود");
+      if(q<=0) return alert("❌ أدخل كمية صحيحة");
+      if(pr<=0) return alert("❌ أدخل سعر بيع صحيح");
+
+      let p=products.find(x=>x.barcode===b);
+      if(!p) return alert("❌ المنتج غير موجود — أضفه أولاً من صفحة المنتجات");
+
+      if((p.stock||0) < q) return alert("❌ مخزون غير كافٍ");
+
+      // خصم من المخزون وتسجيل العملية
+      p.stock -= q;
+      recordTransaction(b,q,pr);
+      saveData(); loadProducts();
+      alert("✔ تمت عملية البيع");
+      document.getElementById("sellBarcode").value="";
+      document.getElementById("sellQty").value="1";
+      document.getElementById("sellPrice").value="";
+    }
+
+    function calcProfit(){
+      let s=0,c=0;
+      transactions.forEach(t=>{ s+= (t.price||0)*(t.qty||0); c+= (t.cost||0); });
+      document.getElementById("totalSales").textContent=s.toFixed(2);
+      document.getElementById("totalCost").textContent=c.toFixed(2);
+      document.getElementById("netProfit").textContent=(s-c).toFixed(2);
+    }
+
+    function loadHistory(){
+      const tbody=document.querySelector("#historyTable tbody");
+      tbody.innerHTML="";
+      transactions.forEach(t=>{
+        tbody.innerHTML+=`<tr>
+          <td>${t.type}</td>
+          <td>${t.barcode}</td>
+          <td>${t.qty}</td>
+          <td>${t.price}</td>
+          <td>${t.total}</td>
+          <td>${t.date}</td>
+        </tr>`;
+      });
+    }
+
+    function showPage(id){
+      document.querySelectorAll("section").forEach(s=>s.classList.remove("active"));
+      document.getElementById(id).classList.add("active");
+      if(id==="products") loadProducts();
+      if(id==="profit") calcProfit();
+      if(id==="history") loadHistory();
+    }
 
     // 📤 تصدير
     function exportData() {
@@ -207,16 +323,15 @@
 
           let newProducts = 0, updatedProducts = 0, addedTransactions = 0;
 
-          // دمج المنتجات
           if(imported.products){
             imported.products.forEach(newProd=>{
               let existing = products.find(p=>p.barcode === newProd.barcode);
               if(existing){
                 let updated=false;
-                if(newProd.price && newProd.price !== existing.price){
+                if(typeof newProd.price === "number" && newProd.price !== existing.price){
                   existing.price=newProd.price; updated=true;
                 }
-                if(newProd.stock){
+                if(typeof newProd.stock === "number"){
                   existing.stock=(existing.stock||0)+(newProd.stock||0); updated=true;
                 }
                 if(updated) updatedProducts++;
@@ -226,7 +341,6 @@
             });
           }
 
-          // دمج السجلات
           if(imported.transactions){
             imported.transactions.forEach(tr=>{
               transactions.push(tr);
@@ -236,7 +350,6 @@
 
           saveData(); loadProducts(); loadHistory();
 
-          // عرض النتيجة
           let msg = `📦 منتجات جديدة: ${newProducts}<br>🔄 منتجات محدّثة: ${updatedProducts}<br>📝 سجلات مضافة: ${addedTransactions}`;
           document.getElementById("mergeMessage").innerHTML = msg;
           document.getElementById("mergeModal").style.display = "block";
@@ -250,22 +363,52 @@
 
     function closeModal(){ document.getElementById("mergeModal").style.display="none"; }
 
-    // 📷 الماسح (ZXing)
+    // 📷 الماسح (ZXing) — شاشة كاملة + مسح مستمر
     async function startScanner(mode){
       scannerMode=mode;
+      stopAfterFirst=false;
+
       document.getElementById("scanner").style.display="block";
-      document.getElementById("lastScan").textContent="📷 جاري المسح...";
-      if(codeReader){ codeReader.reset(); }
+      document.getElementById("lastScan").textContent="";
+
+      if(codeReader){ try{ codeReader.reset(); }catch(e){} }
       codeReader=new ZXing.BrowserMultiFormatReader();
+
       try{
-        const result=await codeReader.decodeOnceFromVideoDevice(undefined,"video");
-        document.getElementById("beep").play();
-        document.getElementById("lastScan").textContent="✅ آخر باركود: "+result.text;
-        if(scannerMode==="sell") document.getElementById("sellBarcode").value=result.text;
-        if(scannerMode==="product") document.getElementById("pbarcode").value=result.text;
-        codeReader.reset();
-        document.getElementById("scanner").style.display="none";
-      }catch(err){ console.error(err); document.getElementById("lastScan").textContent="❌ لم يتم التعرف"; }
+        const constraints = {
+          video: {
+            facingMode: { ideal: "environment" },
+            width: { ideal: 1920 },
+            height:{ ideal: 1080 }
+          }
+        };
+
+        await codeReader.decodeFromVideoDevice(null, "video", (result, err) => {
+          if (stopAfterFirst) return;
+          if (result) {
+            stopAfterFirst = true;
+            document.getElementById("beep").play();
+            const code = result.text || "";
+            document.getElementById("lastScan").textContent = "✅ آخر باركود: " + code;
+
+            if(scannerMode==="sell") document.getElementById("sellBarcode").value = code;
+            if(scannerMode==="product") document.getElementById("pbarcode").value = code;
+
+            stopScanner();
+          }
+        }, constraints);
+
+      }catch(err){
+        console.error(err);
+        document.getElementById("lastScan").textContent="❌ لم يتم التعرف";
+      }
+    }
+
+    function stopScanner(){
+      try{
+        if(codeReader){ codeReader.reset(); }
+      }catch(e){}
+      document.getElementById("scanner").style.display="none";
     }
 
     loadProducts();
